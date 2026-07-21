@@ -4,5 +4,5 @@ ruff==0.15.*
 mypy
 types-PyYAML
 pytest-cov>=7.1.0
-hypothesis>=6
+hypothesis>=6.157.2
 mutmut>=3.6.0
