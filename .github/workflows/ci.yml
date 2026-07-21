@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Least privilege by default; jobs opt into exactly what they need.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Action versions are conservative, valid majors; Dependabot keeps them current
+# (see .github/dependabot.yml) and can pin them to commit SHAs.
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv venv --python 3.12
+      - run: uv pip install -r requirements-dev.txt
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  type:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    continue-on-error: true # advisory until findings are fully burned down
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv venv --python 3.12
+      - run: uv pip install -r requirements-dev.txt
+      - run: uv run mypy project_sandbox.py
+
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv venv --python ${{ matrix.python-version }}
+      - run: uv pip install -r requirements-dev.txt
+      - run: >-
+          uv run pytest -m "not slow"
+          --cov=project_sandbox --cov-report=term-missing --cov-fail-under=90
+
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    continue-on-error: true # a fresh upstream CVE shouldn't block unrelated PRs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/gh-action-pip-audit@v1
+        with:
+          inputs: requirements-dev.txt
+
+  meta:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint (lints workflows; runs shellcheck on run-blocks)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+      - name: yamllint (advisory)
+        run: pipx run yamllint -d relaxed .github examples || true
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: docker compose version # ubuntu-latest ships Docker + Compose v2
+      - run: uv venv --python 3.12
+      - run: uv pip install -r requirements-dev.txt
+      - run: uv run pytest -m slow -v
+
+  # Single stable check for branch protection: passes only if all blocking jobs pass.
+  gate:
+    needs: [lint, test, meta, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all required checks passed"

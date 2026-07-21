@@ -1,0 +1,34 @@
+# Config only — project-sandbox is a single installed script, not a packaged library,
+# so there is intentionally no [build-system] or [project] table here.
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B", "SIM", "C4", "S"]
+# E402: deliberate mid-file/lazy imports (yaml, json, socket, re, subprocess).
+# S603/S607: subprocess is the tool's whole job — list-form calls, never shell=True.
+# SIM115: a few intentional one-liner file reads in a short-lived CLI process.
+ignore = ["E402", "S603", "S607", "SIM115"]
+
+[tool.ruff.lint.per-file-ignores]
+# pytest asserts, compact test setup (semicolons/grouped imports), and /tmp fixtures
+"tests/*" = ["S101", "E402", "E702", "E401", "S108"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+# type hints are partial by design; do NOT enable strict.
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+markers = ["slow: integration tests that require a running Docker daemon"]
+
+[tool.coverage.run]
+source = ["project_sandbox"]
+
+[tool.mutmut]
+source_paths = "project_sandbox.py"
+runner = "python -m pytest -m 'not slow' -x -q"

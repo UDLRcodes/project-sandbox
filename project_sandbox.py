@@ -4,6 +4,7 @@
 Each instance gets its own Compose project, network, offset host ports, cloned baseline
 DB volumes, and (optionally) git worktrees. Docker is the state store; there is no daemon.
 """
+
 from __future__ import annotations
 
 __version__ = "0.1.0"
@@ -172,6 +173,7 @@ def render_template(template: str, values: dict) -> str:
         if key not in values:
             raise TemplateError(f"unknown placeholder ${{{key}}} in template")
         return str(values[key])
+
     return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", repl, template)
 
 
@@ -218,25 +220,36 @@ def _namespaced_volume_names(project_name, proj_basename, compose, exclude):
     # in one group that declare the same volume key (e.g. both 'vendor') don't collide
     # into a single <project>_<key> volume. Excludes db_baseline volumes (handled as
     # external clones).
-    return {vk: f"{project_name}-{proj_basename}-{vk}"
-            for vk in (compose.get("volumes") or {})
-            if vk not in exclude}
+    return {
+        vk: f"{project_name}-{proj_basename}-{vk}"
+        for vk in (compose.get("volumes") or {})
+        if vk not in exclude
+    }
 
 
-def build_override(compose, project, ports, instance, network_name,
-                   port_key_by_service, volume_renames=None, volume_names=None) -> dict:
+def build_override(
+    compose,
+    project,
+    ports,
+    instance,
+    network_name,
+    port_key_by_service,
+    volume_renames=None,
+    volume_names=None,
+) -> dict:
     volume_renames = volume_renames or {}
     volume_names = volume_names or {}
     rebuild = bool(project.get("rebuild_per_instance"))
-    rendered_args = {
-        k: render_template(v, ports)
-        for k, v in project.get("build_args", {}).items()
-    } if rebuild else {}
+    rendered_args = (
+        {k: render_template(v, ports) for k, v in project.get("build_args", {}).items()}
+        if rebuild
+        else {}
+    )
 
     services_out = {}
     volumes_out = {}
     for svc_name, svc in compose.get("services", {}).items():
-        entry = {}
+        entry: dict[str, object] = {}  # heterogeneous compose-service override fragment
         mapping = port_key_by_service.get(svc_name)
         if mapping:
             new_ports = []
@@ -251,7 +264,7 @@ def build_override(compose, project, ports, instance, network_name,
             source = str(vol).split(":", 1)[0]
             if source in volume_renames:
                 instance_vol = volume_renames[source]
-                new_volumes.append(instance_vol + str(vol)[len(source):])
+                new_volumes.append(instance_vol + str(vol)[len(source) :])
                 volumes_out[instance_vol] = {"name": instance_vol, "external": True}
             else:
                 new_volumes.append(vol)
@@ -292,26 +305,36 @@ def write_override(instance, project_name, override_dict) -> str:
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, f"{project_name}.override.yml")
     with open(path, "w") as fh:
-        yaml.dump(override_dict, fh, Dumper=SandboxDumper,
-                  default_flow_style=False, sort_keys=False)
+        yaml.dump(
+            override_dict, fh, Dumper=SandboxDumper, default_flow_style=False, sort_keys=False
+        )
     return path
 
 
+def _to_int(value):
+    """int(value) or None — never raises (a malformed compose port must not crash the tool)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_port_entry(entry):
-    """Return (host_port:int|None, container_port:str) for a compose port entry."""
+    """Return (host_port:int|None, container_port:str) for a compose port entry.
+
+    A non-numeric/malformed host yields None (the caller skips unmatched ports) rather
+    than raising, so a bad entry in a compose file can't crash bring-up.
+    """
     if isinstance(entry, dict):
-        published = entry.get("published")
-        target = entry.get("target")
-        host = int(published) if published is not None else None
-        return host, str(target)
+        return _to_int(entry.get("published")), str(entry.get("target"))
     text = str(entry)
     parts = text.split(":")
-    if len(parts) == 1:               # "80"
+    if len(parts) == 1:  # "80"
         return None, parts[0]
-    if len(parts) == 2:               # "8080:80"
-        return int(parts[0]), parts[1]
+    if len(parts) == 2:  # "8080:80"
+        return _to_int(parts[0]), parts[1]
     # "127.0.0.1:8080:80"
-    return int(parts[-2]), parts[-1]
+    return _to_int(parts[-2]), parts[-1]
 
 
 def derive_port_key_map(compose, port_defaults):
@@ -352,8 +375,9 @@ class Runner:
 
 
 def _resource_exists(runner, inspect_cmd) -> bool:
-    result = runner.run(inspect_cmd, check=False,
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    result = runner.run(
+        inspect_cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
     return getattr(result, "returncode", 1) == 0
 
 
@@ -385,11 +409,21 @@ def volume_exists(runner, name) -> bool:
 
 def clone_volume(runner, src, dst):
     runner.run(["docker", "volume", "create", dst])
-    runner.run([
-        "docker", "run", "--rm",
-        "-v", f"{src}:/from", "-v", f"{dst}:/to",
-        "alpine", "sh", "-c", "cp -a /from/. /to/",
-    ])
+    runner.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-v",
+            f"{src}:/from",
+            "-v",
+            f"{dst}:/to",
+            "alpine",
+            "sh",
+            "-c",
+            "cp -a /from/. /to/",
+        ]
+    )
 
 
 def remove_volume(runner, name):
@@ -398,11 +432,17 @@ def remove_volume(runner, name):
 
 def list_instances(runner):
     # docker ps -a with our label, JSON per line; Labels is a comma-joined "k=v" string.
-    out = runner.capture([
-        "docker", "ps", "-a",
-        "--filter", "label=project-sandbox.instance",
-        "--format", "{{json .}}",
-    ])
+    out = runner.capture(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            "label=project-sandbox.instance",
+            "--format",
+            "{{json .}}",
+        ]
+    )
     instances = {}
     for line in out.splitlines():
         line = line.strip()
@@ -417,25 +457,30 @@ def list_instances(runner):
         inst = labels.get("project-sandbox.instance")
         if not inst:
             continue
-        rec = instances.setdefault(inst, {
-            "stack": labels.get("project-sandbox.stack"),
-            "containers": [],
-        })
-        rec["containers"].append({
-            "name": obj.get("Names"),
-            "state": obj.get("State"),
-            "status": obj.get("Status"),
-        })
+        rec = instances.setdefault(
+            inst,
+            {
+                "stack": labels.get("project-sandbox.stack"),
+                "containers": [],
+            },
+        )
+        rec["containers"].append(
+            {
+                "name": obj.get("Names"),
+                "state": obj.get("State"),
+                "status": obj.get("Status"),
+            }
+        )
     return instances
 
 
 def worktree_dest(manifest, instance, project_path):
     parent = manifest.get("worktree_parent")
     if not parent:
-        raise ManifestError(
-            "worktree_parent not set in manifest and no --path given")
-    return os.path.join(parent, manifest["stack"], instance,
-                        os.path.basename(project_path.rstrip("/")))
+        raise ManifestError("worktree_parent not set in manifest and no --path given")
+    return os.path.join(
+        parent, manifest["stack"], instance, os.path.basename(project_path.rstrip("/"))
+    )
 
 
 def worktree_add(runner, repo, dest, branch=None, create_branch=False):
@@ -469,6 +514,7 @@ def _run_db_rewrites(runner, manifest, project_name, ports, sleep_fn=None):
     # Note: only ${PORT_KEY} is substituted by the tool; shell vars like "$SA_PASSWORD" pass
     # through so the container (not the manifest) supplies secrets.
     import time as _time
+
     entries = manifest.get("db_rewrite", []) or []
     if not entries:
         return
@@ -486,8 +532,11 @@ def _run_db_rewrites(runner, manifest, project_name, ports, sleep_fn=None):
             if i < attempts - 1:
                 sleep_fn(delay)
         else:
-            print(f"warning: db_rewrite for service '{service}' did not succeed after "
-                  f"{attempts} attempts (is the DB ready?)", file=sys.stderr)
+            print(
+                f"warning: db_rewrite for service '{service}' did not succeed after "
+                f"{attempts} attempts (is the DB ready?)",
+                file=sys.stderr,
+            )
 
 
 def _prewarm_volume(runner, instance_vol, vol_key, project_name, path, image):
@@ -495,19 +544,24 @@ def _prewarm_volume(runner, instance_vol, vol_key, project_name, path, image):
     # image->volume population race when several services share it. instance_vol is
     # the volume's ACTUAL (namespaced) name; vol_key is its compose key (for labels).
     if not image:
-        print(f"warning: prewarm skipped for volume '{vol_key}': no image found",
-              file=sys.stderr)
+        print(f"warning: prewarm skipped for volume '{vol_key}': no image found", file=sys.stderr)
         return
     if volume_exists(runner, instance_vol):
         return
     # Stamp Compose's labels so it adopts the pre-created volume silently (no
     # "not created by Docker Compose" warning) instead of treating it as foreign.
-    runner.run([
-        "docker", "volume", "create",
-        "--label", f"com.docker.compose.project={project_name}",
-        "--label", f"com.docker.compose.volume={vol_key}",
-        instance_vol,
-    ])
+    runner.run(
+        [
+            "docker",
+            "volume",
+            "create",
+            "--label",
+            f"com.docker.compose.project={project_name}",
+            "--label",
+            f"com.docker.compose.volume={vol_key}",
+            instance_vol,
+        ]
+    )
     runner.run(["docker", "run", "--rm", "-v", f"{instance_vol}:{path}", image, "true"])
 
 
@@ -570,82 +624,114 @@ def build_parser():
         epilog=_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--version", action="store_true",
-                   help="print the version and exit")
-    p.add_argument("--dry-run", action="store_true",
-                   help="print every action (and generated file) without executing anything")
-    sub = p.add_subparsers(dest="command", metavar="<command>",
-                           title="commands")
+    p.add_argument("--version", action="store_true", help="print the version and exit")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print every action (and generated file) without executing anything",
+    )
+    sub = p.add_subparsers(dest="command", metavar="<command>", title="commands")
 
     up = sub.add_parser(
-        "up", help="create/refresh an isolated instance and bring its stack up",
+        "up",
+        help="create/refresh an isolated instance and bring its stack up",
         description="Create git worktree(s), allocate offset ports, clone baseline DB "
-                    "volume(s), create the per-instance network, generate compose "
-                    "overrides, and run 'docker compose up -d'. Idempotent per instance.")
+        "volume(s), create the per-instance network, generate compose "
+        "overrides, and run 'docker compose up -d'. Idempotent per instance.",
+    )
     up.add_argument("stack", help="stack name (matches a manifest in the stacks dir)")
-    up.add_argument("--instance", required=True,
-                    help="unique instance name; keys the network, ports, volumes, worktrees")
-    up.add_argument("--branch",
-                    help="git branch to check out in the worktree(s) (created if missing)")
-    up.add_argument("--path",
-                    help="use an existing worktree/dir instead of creating one "
-                         "(single-project stacks only)")
+    up.add_argument(
+        "--instance",
+        required=True,
+        help="unique instance name; keys the network, ports, volumes, worktrees",
+    )
+    up.add_argument(
+        "--branch", help="git branch to check out in the worktree(s) (created if missing)"
+    )
+    up.add_argument(
+        "--path",
+        help="use an existing worktree/dir instead of creating one (single-project stacks only)",
+    )
 
     down = sub.add_parser(
-        "down", help="stop an instance but keep its volumes and worktrees",
+        "down",
+        help="stop an instance but keep its volumes and worktrees",
         description="Run 'docker compose down' for the instance. Volumes and worktrees "
-                    "are kept so a later 'up' is fast.")
+        "are kept so a later 'up' is fast.",
+    )
     down.add_argument("instance", help="instance name")
 
     rm = sub.add_parser(
-        "rm", help="fully remove an instance (containers, volumes, network, worktrees)",
+        "rm",
+        help="fully remove an instance (containers, volumes, network, worktrees)",
         description="Full teardown: 'down -v', remove cloned volumes and the per-instance "
-                    "network, remove worktrees, delete instance state, drop the registry entry.")
+        "network, remove worktrees, delete instance state, drop the registry entry.",
+    )
     rm.add_argument("instance", help="instance name")
-    rm.add_argument("--keep-worktree", action="store_true",
-                    help="do not remove the git worktree(s)")
+    rm.add_argument(
+        "--keep-worktree", action="store_true", help="do not remove the git worktree(s)"
+    )
 
     status = sub.add_parser(
-        "status", help="show details for one instance",
+        "status",
+        help="show details for one instance",
         description="Print an instance's stack, ports, network, worktrees, and "
-                    "'docker compose ps' output.")
+        "'docker compose ps' output.",
+    )
     status.add_argument("instance", help="instance name")
 
-    sub.add_parser("ls", help="list all sandboxes (running + recorded)",
-                   description="List every instance from Docker labels joined with the "
-                               "registry: stack, state, and ports.")
+    sub.add_parser(
+        "ls",
+        help="list all sandboxes (running + recorded)",
+        description="List every instance from Docker labels joined with the "
+        "registry: stack, state, and ports.",
+    )
 
     bl = sub.add_parser(
-        "baseline", help="create/update the baseline DB volume(s) for a stack",
+        "baseline",
+        help="create/update the baseline DB volume(s) for a stack",
         description="Create the baseline volume(s) declared in the manifest's db_baseline. "
-                    "Seed once; 'up' clones the baseline per instance.")
+        "Seed once; 'up' clones the baseline per instance.",
+    )
     bl.add_argument("stack", help="stack name")
-    bl.add_argument("--force", action="store_true",
-                    help="recreate the baseline volume if it already exists")
+    bl.add_argument(
+        "--force", action="store_true", help="recreate the baseline volume if it already exists"
+    )
 
     ini = sub.add_parser(
-        "init", help="generate a first-draft manifest from compose/.env",
+        "init",
+        help="generate a first-draft manifest from compose/.env",
         description="Parse the given project(s)' docker-compose.yml and .env to write a "
-                    "draft manifest for review. Refuses to overwrite without --force.")
+        "draft manifest for review. Refuses to overwrite without --force.",
+    )
     ini.add_argument("stack", help="stack name (also the manifest filename)")
-    ini.add_argument("--project", action="append", default=[], metavar="PATH",
-                     help="a project directory to include (repeatable)")
-    ini.add_argument("--force", action="store_true",
-                     help="overwrite an existing manifest")
+    ini.add_argument(
+        "--project",
+        action="append",
+        default=[],
+        metavar="PATH",
+        help="a project directory to include (repeatable)",
+    )
+    ini.add_argument("--force", action="store_true", help="overwrite an existing manifest")
 
     lg = sub.add_parser(
-        "logs", help="follow logs for an instance (compose logs -f)",
-        description="Passthrough to 'docker compose logs -f' for the instance.")
+        "logs",
+        help="follow logs for an instance (compose logs -f)",
+        description="Passthrough to 'docker compose logs -f' for the instance.",
+    )
     lg.add_argument("instance", help="instance name")
     lg.add_argument("service", nargs="?", help="optional service to filter to")
 
     ex = sub.add_parser(
-        "exec", help="run a command in an instance's service (compose exec)",
-        description="Passthrough to 'docker compose exec <service> ...' for the instance.")
+        "exec",
+        help="run a command in an instance's service (compose exec)",
+        description="Passthrough to 'docker compose exec <service> ...' for the instance.",
+    )
     ex.add_argument("instance", help="instance name")
     ex.add_argument("service", help="service name")
-    ex.add_argument("cmd", nargs=argparse.REMAINDER,
-                    help="command to run (prefix with -- to separate flags)")
+    ex.add_argument(
+        "cmd", nargs=argparse.REMAINDER, help="command to run (prefix with -- to separate flags)"
+    )
     return p
 
 
@@ -677,6 +763,7 @@ def main(argv=None):
     missing = check_dependencies()
     if missing:
         import sys as _sys
+
         for name, hint in missing:
             print(f"error: missing dependency '{name}': {hint}", file=_sys.stderr)
         return 1
@@ -713,8 +800,8 @@ def _merge_compose(files):
 
 def _branch_exists(runner, repo, branch):
     return _resource_exists(
-        runner, ["git", "-C", repo, "rev-parse", "--verify", "--quiet",
-                 f"refs/heads/{branch}"])
+        runner, ["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"]
+    )
 
 
 def cmd_up(args, runner):
@@ -723,13 +810,13 @@ def cmd_up(args, runner):
     instance = args.instance
     if args.path and len(manifest["projects"]) > 1:
         raise SandboxError(
-            "--path is only valid for single-project stacks; groups use worktree_parent")
+            "--path is only valid for single-project stacks; groups use worktree_parent"
+        )
 
     reg = load_registry()
     existing = reg["instances"].get(instance)
     if existing and existing.get("stack") not in (None, stack):
-        raise SandboxError(
-            f"instance '{instance}' already exists for stack '{existing['stack']}'")
+        raise SandboxError(f"instance '{instance}' already exists for stack '{existing['stack']}'")
 
     offset = allocate_offset(reg, instance)
     ports = compute_ports(manifest["ports"], offset)
@@ -748,8 +835,7 @@ def cmd_up(args, runner):
             if args.branch and not runner.dry_run:
                 create = not _branch_exists(runner, proj["path"], args.branch)
             if runner.dry_run or not os.path.exists(dest):
-                worktree_add(runner, proj["path"], dest,
-                             branch=args.branch, create_branch=create)
+                worktree_add(runner, proj["path"], dest, branch=args.branch, create_branch=create)
             working_dirs[proj["path"]] = dest
             worktree_paths.append(dest)
 
@@ -789,14 +875,21 @@ def cmd_up(args, runner):
         # per-project volume namespacing avoids collisions when two projects in the
         # group declare the same volume key (db_baseline volumes handled separately)
         proj_vol_names = _namespaced_volume_names(
-            project_name, proj_name, compose, set(volume_renames))
+            project_name, proj_name, compose, set(volume_renames)
+        )
         instance_volumes.update(proj_vol_names.values())
         for svc_name in compose.get("services", {}):
             svc_vol_names[svc_name] = proj_vol_names
         override = build_override(
-            compose=compose, project=proj, ports=ports, instance=instance,
-            network_name=network_name, port_key_by_service=port_key_by_service,
-            volume_renames=volume_renames, volume_names=proj_vol_names)
+            compose=compose,
+            project=proj,
+            ports=ports,
+            instance=instance,
+            network_name=network_name,
+            port_key_by_service=port_key_by_service,
+            volume_renames=volume_renames,
+            volume_names=proj_vol_names,
+        )
         # stamp identifying labels on every service
         for svc_name in compose.get("services", {}):
             svc_entry = override.setdefault("services", {}).setdefault(svc_name, {})
@@ -819,8 +912,11 @@ def cmd_up(args, runner):
                 if runner.dry_run:
                     print(f"+ rewrite env {target_env}: {rewrites}")
                 else:
-                    lines = (open(target_env).read().splitlines(keepends=True)
-                             if os.path.exists(target_env) else [])
+                    lines = (
+                        open(target_env).read().splitlines(keepends=True)
+                        if os.path.exists(target_env)
+                        else []
+                    )
                     with open(target_env, "w") as fh:
                         fh.writelines(rewrite_env_lines(lines, rewrites))
 
@@ -841,9 +937,13 @@ def cmd_up(args, runner):
     # 6. Record the instance BEFORE bring-up, so a failed 'up' is still tracked and
     # removable via 'rm' (rather than leaving untracked orphaned resources).
     reg["instances"][instance] = {
-        "stack": stack, "offset": offset, "ports": ports,
-        "worktrees": worktree_paths, "project_name": project_name,
-        "network": network_name, "volumes": sorted(instance_volumes),
+        "stack": stack,
+        "offset": offset,
+        "ports": ports,
+        "worktrees": worktree_paths,
+        "project_name": project_name,
+        "network": network_name,
+        "volumes": sorted(instance_volumes),
         "projects": [p["path"] for p in manifest["projects"]],
         "path_override": args.path,
     }
@@ -893,8 +993,9 @@ def _network_exists(runner, name):
 
 def _project_has_containers(runner, project_name):
     out = runner.capture(
-        ["docker", "ps", "-aq", "--filter",
-         f"label=com.docker.compose.project={project_name}"], check=False)
+        ["docker", "ps", "-aq", "--filter", f"label=com.docker.compose.project={project_name}"],
+        check=False,
+    )
     return bool(out.strip())
 
 
@@ -988,8 +1089,7 @@ def cmd_init(args, runner):
         raise SandboxError("init requires at least one --project <path>")
     out_path = manifest_path(stack)
     if os.path.exists(out_path) and not args.force:
-        raise SandboxError(
-            f"manifest already exists at {out_path} (use --force to overwrite)")
+        raise SandboxError(f"manifest already exists at {out_path} (use --force to overwrite)")
 
     proj_paths = [os.path.expanduser(p) for p in args.project]
     ports = {}
@@ -997,7 +1097,9 @@ def cmd_init(args, runner):
     env_suggestions = []
     for ppath in proj_paths:
         cfile = os.path.join(ppath, "docker-compose.yml")
-        compose = _merge_compose([cfile]) if os.path.exists(cfile) else {"services": {}, "networks": {}}
+        compose = (
+            _merge_compose([cfile]) if os.path.exists(cfile) else {"services": {}, "networks": {}}
+        )
         for svc_name, svc in compose.get("services", {}).items():
             for entry in svc.get("ports", []) or []:
                 host, container = _parse_port_entry(entry)
@@ -1035,7 +1137,9 @@ def cmd_init(args, runner):
         lines.append(f"  {k}: {v}")
     lines.append("")
     lines.append("# env_rewrite: rewrite host/browser-facing URLs to the instance's offset ports.")
-    lines.append("# Map each key below to the right port template, e.g. \"http://localhost:${API_WEB_80}\".")
+    lines.append(
+        '# Map each key below to the right port template, e.g. "http://localhost:${API_WEB_80}".'
+    )
     for env_path, key, val in env_suggestions:
         lines.append(f"#   {env_path} -> {key}: {val}")
     lines.append("")
@@ -1066,14 +1170,19 @@ def cmd_baseline(args, runner):
         baseline_name = entry.get("source") or f"{stack}-db-baseline"
         if volume_exists(runner, baseline_name) and not args.force:
             raise SandboxError(
-                f"baseline volume '{baseline_name}' already exists (use --force to recreate)")
+                f"baseline volume '{baseline_name}' already exists (use --force to recreate)"
+            )
         if args.force:
             remove_volume(runner, baseline_name)
         runner.run(["docker", "volume", "create", baseline_name])
         print(f"created baseline volume '{baseline_name}' for service '{entry['service']}'.")
-    print("Seed the baseline volume(s): start your DB against the baseline volume, "
-          "restore/migrate/seed, then stop. 'up' clones the baseline per instance.")
+    print(
+        "Seed the baseline volume(s): start your DB against the baseline volume, "
+        "restore/migrate/seed, then stop. 'up' clones the baseline per instance."
+    )
     return 0
+
+
 def cmd_logs(args, runner):
     _reg, entry = _reg_entry(args.instance)
     a = ["logs", "-f"]
@@ -1094,4 +1203,5 @@ def cmd_exec(args, runner):
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main(sys.argv[1:]))

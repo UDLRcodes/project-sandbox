@@ -1,2 +1,8 @@
 pytest>=8
 PyYAML>=6
+ruff==0.15.*
+mypy
+types-PyYAML
+pytest-cov>=5
+hypothesis>=6
+mutmut>=3

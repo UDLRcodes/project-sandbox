@@ -1,5 +1,8 @@
 # ,project-sandbox
 
+[![ci](https://github.com/UDLRcodes/project-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/UDLRcodes/project-sandbox/actions/workflows/ci.yml)
+[![codeql](https://github.com/UDLRcodes/project-sandbox/actions/workflows/codeql.yml/badge.svg)](https://github.com/UDLRcodes/project-sandbox/actions/workflows/codeql.yml)
+
 `,project-sandbox` spins up isolated, parallel copies of Docker Compose application stacks — a single project or a multi-project group — with per-instance networks, offset host ports, cloned baseline DB volumes, and managed git worktrees. Docker is the state store, so there is no daemon: instances are described by a small manifest and reconstructed deterministically from Docker labels plus a JSON registry.
 
 ## Requirements
@@ -227,3 +230,30 @@ Needs the database baseline seeded first (see [`baseline`](#commands)):
 ,project-sandbox logs demo api-web
 ,project-sandbox rm demo
 ```
+
+## Development & CI
+
+Set up a dev environment and run the same checks CI does:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+make lint        # ruff check + ruff format --check
+make typecheck   # mypy
+make test        # full pytest suite (the 'slow' e2e test needs Docker)
+make coverage    # non-slow suite with a 90% coverage gate
+```
+
+Every pull request runs, via GitHub Actions (all free for public repos, no secrets):
+
+- **`ci.yml`** — ruff lint + format, mypy (advisory), pytest across Python 3.11–3.14 with a
+  90% coverage gate, `pip-audit`, workflow linting (actionlint/yamllint), and the real-Docker
+  e2e test. A `gate` job aggregates the required checks.
+- **`codeql.yml`** — CodeQL security scanning (`security-extended`).
+- **`mutation.yml`** — mutation testing (`mutmut`) as an adversarial "test-the-tests" layer;
+  runs weekly, on demand, or when a PR is labelled `mutation` (advisory).
+
+Property-based tests (Hypothesis) fuzz the pure-logic functions as part of the normal suite.
+
+Optional: install the free-for-OSS [LlamaPReview](https://jetxu-llm.github.io/LlamaPReview-site/)
+GitHub App for automated LLM code review on PRs (no secrets, no cost). Paid/secret-based LLM
+review actions are intentionally not used.

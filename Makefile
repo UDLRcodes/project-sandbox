@@ -3,12 +3,24 @@ DATA ?= $(HOME)/.local/share/project-sandbox
 VENV := $(DATA)/venv
 NAME := ,project-sandbox
 
-.PHONY: test lint install uninstall
+.PHONY: test lint format typecheck coverage install uninstall
 test:
 	.venv/bin/pytest -q
 
+# Mirror the CI gates locally.
 lint:
-	.venv/bin/python -m py_compile project_sandbox.py
+	.venv/bin/ruff check .
+	.venv/bin/ruff format --check .
+
+format:
+	.venv/bin/ruff check --fix .
+	.venv/bin/ruff format .
+
+typecheck:
+	.venv/bin/mypy project_sandbox.py
+
+coverage:
+	.venv/bin/pytest -m "not slow" --cov=project_sandbox --cov-report=term-missing --cov-fail-under=90
 
 # Installs a self-contained copy: a private venv (with PyYAML) plus the script,
 # whose shebang is rewritten to that venv's python. Touches nothing system-wide.
