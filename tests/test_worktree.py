@@ -1,4 +1,5 @@
 import pytest
+
 import project_sandbox as ps
 
 
@@ -31,10 +32,12 @@ def test_worktree_remove():
 
 
 def test_remove_if_empty(tmp_path):
-    empty = tmp_path / "empty"; empty.mkdir()
-    full = tmp_path / "full"; (full / "x").mkdir(parents=True)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    full = tmp_path / "full"
+    (full / "x").mkdir(parents=True)
     assert ps._remove_if_empty(str(empty)) is True
     assert not empty.exists()
-    assert ps._remove_if_empty(str(full)) is False   # non-empty is left alone
+    assert ps._remove_if_empty(str(full)) is False  # non-empty is left alone
     assert full.exists()
     assert ps._remove_if_empty(str(tmp_path / "missing")) is False  # tolerant

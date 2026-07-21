@@ -1,11 +1,14 @@
 # tests/test_env.py
 import pytest
+
 import project_sandbox as ps
 
 
 def test_render_template():
-    assert ps.render_template("http://localhost:${API_WEB}", {"API_WEB": 8180}) \
+    assert (
+        ps.render_template("http://localhost:${API_WEB}", {"API_WEB": 8180})
         == "http://localhost:8180"
+    )
 
 
 def test_render_unknown_placeholder_raises():

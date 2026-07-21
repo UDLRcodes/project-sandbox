@@ -3,12 +3,21 @@ import project_sandbox as ps
 
 
 def test_compose_cmd_shape():
-    cmd = ps.compose_cmd("webapp-demo",
-                         ["/a/docker-compose.yml", "/s/api.override.yml"],
-                         ["up", "-d"])
-    assert cmd == ["docker", "compose", "-p", "webapp-demo",
-                   "-f", "/a/docker-compose.yml", "-f", "/s/api.override.yml",
-                   "up", "-d"]
+    cmd = ps.compose_cmd(
+        "webapp-demo", ["/a/docker-compose.yml", "/s/api.override.yml"], ["up", "-d"]
+    )
+    assert cmd == [
+        "docker",
+        "compose",
+        "-p",
+        "webapp-demo",
+        "-f",
+        "/a/docker-compose.yml",
+        "-f",
+        "/s/api.override.yml",
+        "up",
+        "-d",
+    ]
 
 
 def test_clone_volume_commands():

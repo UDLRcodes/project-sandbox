@@ -24,12 +24,14 @@ def test_offset_fills_lowest_gap():
 
 def test_compute_ports():
     assert ps.compute_ports({"API_WEB": 8080, "MSSQL": 1433}, 100) == {
-        "API_WEB": 8180, "MSSQL": 1533,
+        "API_WEB": 8180,
+        "MSSQL": 1533,
     }
 
 
 def test_is_port_free_on_bound_socket():
     import socket
+
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     taken = s.getsockname()[1]
@@ -41,12 +43,14 @@ def test_is_port_free_on_bound_socket():
 
 def test_verify_ports_free_reports_taken():
     import socket
+
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     taken = s.getsockname()[1]
     try:
-        assert ps.verify_ports_free({"X": taken, "Y": 0}) == [taken] or \
-               taken in ps.verify_ports_free({"X": taken})
+        assert ps.verify_ports_free({"X": taken, "Y": 0}) == [
+            taken
+        ] or taken in ps.verify_ports_free({"X": taken})
     finally:
         s.close()
 
