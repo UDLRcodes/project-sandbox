@@ -3,6 +3,6 @@ PyYAML>=6
 ruff==0.15.*
 mypy
 types-PyYAML
-pytest-cov>=5
+pytest-cov>=7.1.0
 hypothesis>=6
 mutmut>=3
