@@ -21,7 +21,9 @@ def test_compute_ports_adds_offset_uniformly(defaults, offset):
 
 @given(st.lists(st.integers(min_value=1, max_value=40)))
 def test_allocate_offset_is_a_fresh_positive_multiple(offset_units):
-    reg = {"instances": {f"i{n}": {"offset": u * ps.BLOCK_SIZE} for n, u in enumerate(offset_units)}}
+    reg = {
+        "instances": {f"i{n}": {"offset": u * ps.BLOCK_SIZE} for n, u in enumerate(offset_units)}
+    }
     got = ps.allocate_offset(reg, "brand-new")
     assert got > 0 and got % ps.BLOCK_SIZE == 0
     assert got not in {i["offset"] for i in reg["instances"].values()}

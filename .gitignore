@@ -8,3 +8,6 @@ docs/plans/
 .hypothesis/
 .mutmut-cache
 mutants/
+.coverage
+coverage.xml
+htmlcov/
