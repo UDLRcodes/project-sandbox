@@ -1,0 +1,86 @@
+# Example project-sandbox manifest: a fictional multi-project web app "webapp".
+#
+# It demonstrates every feature you'll need for a non-trivial multi-service stack that
+# authenticates users (an API + a web app + a login SPA + a database). Adapt names/paths
+# to your own stack. Draft a first version with:  ,project-sandbox init webapp --project ...
+
+stack: webapp
+
+# Base name for the per-instance network. The script creates "<network>_<instance>" and
+# attaches every project to it, so inter-service DNS (api-db, api-web, ...) keeps working
+# with NO port rewriting. Only host/browser-facing URLs get offset ports (see env_rewrite).
+network: app_network
+
+# Git worktrees are created under <worktree_parent>/<stack>/<instance>/<project>.
+worktree_parent: ~/Code/.worktrees
+
+projects:
+  - path: ~/Code/api
+    creates_network: true          # brought up first; owns network creation
+    # Gitignored files a fresh worktree won't have but the app needs at runtime.
+    # (.env at the repo root is auto-copied; list everything else here.)
+    copy_files:
+      - storage/oauth-private.key   # e.g. OAuth signing keys — missing => token errors
+      - storage/oauth-public.key
+      - config/cors.php             # if gitignored; carry a localhost-any-port CORS pattern
+  - path: ~/Code/web
+    # This project keeps its .env in a subdir, so copy it explicitly.
+    copy_files: [web/.env]
+  - path: ~/Code/login
+    rebuild_per_instance: true      # SPA bakes its backend URL at BUILD time
+    build_args:
+      BACKEND_URL: "http://localhost:${API_WEB}"   # the browser bundle targets this instance
+
+# Host ports to offset per instance (logical name -> default host port).
+ports:
+  API_WEB: 8080
+  WEB_PORT: 8081
+  LOGIN_APP: 8083
+  API_DB: 1433
+  MAIL_UI: 8025
+
+# Rewrite host-facing config per instance. THREE classes of reference:
+#   - compose service refs (DB_HOST=api-db): no change — service DNS is stable.
+#   - server-side URLs (one container HTTP-calling another): use the internal service DNS
+#     (http://api-web/) — inside a container "localhost:<hostport>" points at itself.
+#   - browser/redirect/asset URLs: use the instance's offset host port (${...}).
+env_rewrite:
+  ~/Code/api/.env:
+    APP_URL: "http://localhost:${API_WEB}"
+    CLIENT_BASE_URL: "http://localhost:${WEB_PORT}"
+  ~/Code/login/.env:
+    BACKEND_URL: "http://localhost:${API_WEB}"
+  ~/Code/web/web/.env:
+    api_internal: "http://api-web/"                              # SERVER-SIDE (internal DNS)
+    api_backend: "http://localhost:${API_WEB}/"                  # browser AJAX
+    HTTPHOST: "http://localhost:${WEB_PORT}"                     # this app (browser)
+    ASSET_DOMAIN: "http://localhost:${WEB_PORT}/web/"            # browser assets
+    LOGIN_URL: "http://localhost:${LOGIN_APP}/?returnTo=webapp"  # browser redirect
+
+# Clone a pristine, pre-seeded DB volume per instance (fast; each instance diverges).
+# Seed it once with known test data/credentials so instances are immediately usable:
+#   ,project-sandbox baseline webapp
+db_baseline:
+  - service: api-db
+    volume: dbdata
+
+# Pre-populate shared fresh volumes once (single writer) to avoid the concurrent
+# image->volume population race when several services mount the same new volume.
+# `path` must be the volume's ACTUAL in-container mount point (may be a subdir).
+prewarm_volumes:
+  - {volume: vendor, service: api-php, path: /app/vendor}
+  - {volume: vendor, service: web-php, path: /app/web/vendor}
+
+# Some apps store host-facing URLs IN THE DATABASE too (e.g. an auth/routes table seeded
+# from the baseline with default ports). db_rewrite runs a templated command inside a DB
+# service after 'up' (retried until ready). Only ${...} is substituted by the tool;
+# "$SA_PASSWORD" is expanded by the container, keeping the secret out of the manifest.
+db_rewrite:
+  - service: api-db
+    command:
+      - sh
+      - -c
+      - >-
+        /opt/mssql-tools18/bin/sqlcmd -S localhost -U SA -P "$SA_PASSWORD" -No -C -d appdb -Q
+        "UPDATE dbo.app_routes SET
+        url = REPLACE(REPLACE(url,'localhost:8081','localhost:${WEB_PORT}'),'localhost:8083','localhost:${LOGIN_APP}');"
