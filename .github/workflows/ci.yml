@@ -68,7 +68,7 @@ jobs:
     continue-on-error: true # a fresh upstream CVE shouldn't block unrelated PRs
     steps:
       - uses: actions/checkout@v7
-      - uses: pypa/gh-action-pip-audit@v1
+      - uses: pypa/gh-action-pip-audit@v1.1.0 # this action publishes no floating v1 tag; pin the real release
         with:
           inputs: requirements-dev.txt
 
