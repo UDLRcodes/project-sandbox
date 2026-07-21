@@ -21,7 +21,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -36,7 +36,7 @@ jobs:
       contents: read
     continue-on-error: true # advisory until findings are fully burned down
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv venv --python 3.12
       - run: uv pip install -r requirements-dev.txt
@@ -51,7 +51,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
@@ -67,7 +67,7 @@ jobs:
       contents: read
     continue-on-error: true # a fresh upstream CVE shouldn't block unrelated PRs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pypa/gh-action-pip-audit@v1
         with:
           inputs: requirements-dev.txt
@@ -77,7 +77,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: actionlint (lints workflows; runs shellcheck on run-blocks)
         run: |
           bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
@@ -91,7 +91,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: docker compose version # ubuntu-latest ships Docker + Compose v2
       - run: uv venv --python 3.12
