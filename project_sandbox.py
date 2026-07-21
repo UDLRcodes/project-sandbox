@@ -311,21 +311,30 @@ def write_override(instance, project_name, override_dict) -> str:
     return path
 
 
+def _to_int(value):
+    """int(value) or None — never raises (a malformed compose port must not crash the tool)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_port_entry(entry):
-    """Return (host_port:int|None, container_port:str) for a compose port entry."""
+    """Return (host_port:int|None, container_port:str) for a compose port entry.
+
+    A non-numeric/malformed host yields None (the caller skips unmatched ports) rather
+    than raising, so a bad entry in a compose file can't crash bring-up.
+    """
     if isinstance(entry, dict):
-        published = entry.get("published")
-        target = entry.get("target")
-        host = int(published) if published is not None else None
-        return host, str(target)
+        return _to_int(entry.get("published")), str(entry.get("target"))
     text = str(entry)
     parts = text.split(":")
     if len(parts) == 1:  # "80"
         return None, parts[0]
     if len(parts) == 2:  # "8080:80"
-        return int(parts[0]), parts[1]
+        return _to_int(parts[0]), parts[1]
     # "127.0.0.1:8080:80"
-    return int(parts[-2]), parts[-1]
+    return _to_int(parts[-2]), parts[-1]
 
 
 def derive_port_key_map(compose, port_defaults):
